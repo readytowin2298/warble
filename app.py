@@ -5,7 +5,7 @@ from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
 
 from forms import UserAddForm, LoginForm, MessageForm, EditUserForm
-from models import db, connect_db, User, Message
+from models import db, connect_db, User, Message, Likes
 
 CURR_USER_KEY = "curr_user"
 
@@ -18,9 +18,9 @@ app.config['SQLALCHEMY_DATABASE_URI'] = (
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ECHO'] = False
-app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = True
+# app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = True
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', "it's a secret")
-toolbar = DebugToolbarExtension(app)
+# toolbar = DebugToolbarExtension(app)
 
 connect_db(app)
 
@@ -306,6 +306,37 @@ def messages_destroy(message_id):
 
     return redirect(f"/users/{g.user.id}")
 
+@app.route('/users/add_like/<int:msg_id>', methods=['GET', 'POST'])
+def add_like(msg_id):
+    message = Message.query.get_or_404(msg_id)
+    if not g.user:
+        flash("You must be logged in to like warbles", "warning")
+        return redirect("/login")
+    elif message.user is g.user:
+        flash("You can't like your own posts, silly", "warning")
+        return redirect('/')
+    elif message in g.user.likes:
+        to_be_del = Likes.query.filter_by(user_id=g.user.id, message_id=message.id).first()
+        db.session.delete(to_be_del)
+        db.session.commit()
+        return redirect('/')
+    else:
+        like = Likes(message_id=message.id, user_id=g.user.id)
+        db.session.add(like)
+        db.session.commit()
+        return redirect('/')
+
+@app.route('/users/liked/<int:user_id>', methods=['GET'])
+def show_likes(user_id):
+    user = User.query.get_or_404(user_id)
+    messages = user.likes
+
+    return render_template('/messages/liked.html', user=user, messages=messages)
+
+
+
+
+
 
 ##############################################################################
 # Homepage and error pages
@@ -318,7 +349,6 @@ def homepage():
     - anon users: no messages
     - logged in: 100 most recent messages of followed_users
     """
-
     if g.user:
         visible_users = [u.id for u in g.user.following]
         visible_users.append(g.user.id)
@@ -328,8 +358,7 @@ def homepage():
                     .order_by(Message.timestamp.desc())
                     .limit(100)
                     .all())
-
-        return render_template('home.html', messages=messages)
+        return render_template('home.html', messages=messages, user=g.user)
 
     else:
         return render_template('home-anon.html')
